@@ -5,13 +5,12 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ory/x/dbal"
-
 	"github.com/jmoiron/sqlx"
 	"github.com/pborman/uuid"
 	migrate "github.com/rubenv/sql-migrate"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ory/x/dbal"
 	"github.com/ory/x/sqlcon/dockertest"
 )
 
@@ -52,6 +51,15 @@ func RunPackrMigrationTests(
 			dbs["mysql"] = db
 			m.Unlock()
 		},
+		func() {
+			db, err := dockertest.ConnectToTestCockroachDB()
+			if err != nil {
+				t.Fatalf("Could not connect to database: %v", err)
+			}
+			m.Lock()
+			dbs["cockroach"] = db
+			m.Unlock()
+		},
 	})
 
 	if data != nil {
@@ -59,6 +67,10 @@ func RunPackrMigrationTests(
 	}
 
 	for name, db := range dbs {
+		dialect := db.DriverName()
+		if dialect == "cockroach" {
+			dialect = "postgres"
+		}
 		t.Run(fmt.Sprintf("database=%s", name), func(t *testing.T) {
 			init(t, db)
 
@@ -68,7 +80,7 @@ func RunPackrMigrationTests(
 					for step := 0; step < steps; step++ {
 						t.Run(fmt.Sprintf("up=%d", step), func(t *testing.T) {
 							migrate.SetTable(fmt.Sprintf("%s_%d", mid, sk))
-							n, err := migrate.ExecMax(db.DB, db.DriverName(), ss[name], migrate.Up, 1)
+							n, err := migrate.ExecMax(db.DB, dialect, ss[name], migrate.Up, 1)
 							require.NoError(t, err)
 							require.Equal(t, n, 1, sk)
 
@@ -79,7 +91,7 @@ func RunPackrMigrationTests(
 								}
 
 								migrate.SetTable(fmt.Sprintf("%s_%d_data", mid, sk))
-								n, err = migrate.ExecMax(db.DB, db.DriverName(), data[sk][name], migrate.Up, 1)
+								n, err = migrate.ExecMax(db.DB, dialect, data[sk][name], migrate.Up, 1)
 								require.NoError(t, err)
 								require.Equal(t, n, 1)
 							})
@@ -103,7 +115,7 @@ func RunPackrMigrationTests(
 					migrate.SetTable(fmt.Sprintf("%s_%d", mid, sk))
 					for step := 0; step < steps; step++ {
 						t.Run(fmt.Sprintf("down=%d", step), func(t *testing.T) {
-							n, err := migrate.ExecMax(db.DB, db.DriverName(), ss[name], migrate.Down, 1)
+							n, err := migrate.ExecMax(db.DB, dialect, ss[name], migrate.Down, 1)
 							require.NoError(t, err)
 							require.Equal(t, n, 1)
 						})

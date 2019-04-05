@@ -123,12 +123,15 @@ func (c *SQLConnection) GetDatabase() (*sqlx.DB, error) {
 	c.L.Infof("Connecting with %s", c.URL.Scheme+"://*:*@"+c.URL.Host+c.URL.Path+"?"+clean.RawQuery)
 	u := connectionString(clean)
 
+	if registeredDriver == "cockroach" {
+		registeredDriver = "postgres"
+	}
 	db, err := sql.Open(registeredDriver, u)
 	if err != nil {
 		return nil, errors.Wrapf(err, "could not open SQL connection")
 	}
 
-	c.db = sqlx.NewDb(db, clean.Scheme)
+	c.db = sqlx.NewDb(db, registeredDriver)
 	if err := c.db.Ping(); err != nil {
 		return nil, errors.Wrapf(err, "could not ping SQL connection")
 	}
@@ -204,6 +207,9 @@ func connectionString(clean *url.URL) string {
 	if clean.Scheme == "mysql" {
 		u = strings.Replace(u, "mysql://", "", -1)
 	}
+	if clean.Scheme == "cockroach" {
+		u = strings.Replace(u, "cockroach://", "postgres://", 1)
+	}
 	return u
 }
 
@@ -225,6 +231,11 @@ func (c *SQLConnection) registerDriver() (string, error) {
 			sql.Register(driverName,
 				instrumentedsql.WrapDriver(mysql.MySQLDriver{}, tracingOpts...))
 		case "postgres":
+			// Why does this have to be a pointer? Because the Open method for postgres has a pointer receiver
+			// and does not satisfy the driver.Driver interface.
+			sql.Register(driverName,
+				instrumentedsql.WrapDriver(&pq.Driver{}, tracingOpts...))
+		case "cockroach":
 			// Why does this have to be a pointer? Because the Open method for postgres has a pointer receiver
 			// and does not satisfy the driver.Driver interface.
 			sql.Register(driverName,
